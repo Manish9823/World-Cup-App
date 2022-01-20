@@ -8,7 +8,7 @@ import { ProfilePage } from './pages/profilePage';
 import { ApolloClient, InMemoryCache, ApolloProvider,HttpLink,from } from '@apollo/client';
 import {onError} from '@apollo/client/link/error';
 
-export const url='http://192.168.52.7:3333/graphql/';
+export const url='http://192.168.43.7:3333/graphql/';
 export const addButton='https://www.shareicon.net/data/2015/08/14/84917_plus_512x512.png';
 
 const errorLink=onError(({graphqlErrors,networkError})=>{

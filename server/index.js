@@ -45,6 +45,79 @@ const teamType = new GraphQLObjectType({
 })
 
 
+const repository = {
+    getAllTeams: async function () {
+        try {
+            await client.connect();
+            const database = await client.db('cricket_team');
+            const teamsCollection = await database.collection('teams');
+            return await teamsCollection.find({}).toArray();
+        }
+        finally { await client.close(); }
+    },
+    addTeam: async function (name) {
+        try {
+            await client.connect();
+            const database = await client.db('cricket_team');
+            const teamsCollection = await database.collection('teams');
+            return await teamsCollection.insertOne({ name: name, playerslist: [] });
+        }
+        finally {
+            await client.close();
+        }
+    },
+
+    // TODO :- Transaction
+    addPlayer: async function(args){
+        try {
+            await client.connect();
+            const database = await client.db('cricket_team');
+            const teamsCollection = await database.collection('players');
+            const insertedPlayer = await teamsCollection.insertOne({ name: args.name, about: args.about });
+            const playersCollection = await database.collection('teams');
+            await playersCollection.updateMany({ _id: ObjectId(args.team_id) }, { $push: { playerslist: { _id: insertedPlayer.insertedId, name: args.name } } })
+            return insertedPlayer.insertedId;
+        }
+        finally {
+            await client.close();
+        }
+    },
+
+    // TODO :- Transaction
+    deleteTeam: async function(args){
+        try {
+            await client.connect();
+            const database = await client.db('cricket_team')
+            let teamsCollection = await database.collection('teams');
+            const selectedTeam = await teamsCollection.findOne({ _id: ObjectId(args.teamId) });
+            const playersCollection = await database.collection('players');
+            selectedTeam.playerslist.map(async (player) => {
+               await playersCollection.deleteOne({ _id: player._id });
+            });
+            await teamsCollection.deleteOne({ _id: ObjectId(args.teamId) });
+            return selectedTeam.id;
+        }
+        finally {
+            client.close();
+        }
+    },
+
+    // TODO:- Transaction
+    deletePlayer:async function(args){
+        try {
+            await client.connect();
+            const database = await client.db('cricket_team');
+            const teamsCollection = await database.collection('teams');
+            await teamsCollection.updateOne({ _id: ObjectId(args.teamId) }, { $pull: { playerslist: { _id: ObjectId(args.playerId) } } });
+            const playersCollection = await database.collection('players');
+            await playersCollection.deleteOne({ _id: ObjectId(args.playerId) });
+            return { _id: args.teamId };
+        }
+        finally {
+            client.close();
+        }
+    }
+};
 
 const RootQuery = new GraphQLObjectType({
     name: 'RootQueryType',
@@ -53,19 +126,12 @@ const RootQuery = new GraphQLObjectType({
             type: new GraphQLList(teamType),
             args: {},
             async resolve(parent, args) {
-                async function getData() {
-                    try {
-                        await client.connect();
-                        const database = await client.db('cricket_team');
-                        const collection = await database.collection('teams');
-                        const result = await collection.find({}).toArray();
-                        return result;
-                    }
-                    catch (error) { console.log(error); }
-                    finally { await client.close(); }
+                try {
+                    return await repository.getAllTeams();
                 }
-                let data = await getData().catch(console.dir);
-                return data;
+                catch (err) {
+                    return err;
+                }
             }
         },
         players: {
@@ -121,55 +187,30 @@ const Mutation = new GraphQLObjectType({
                 name: { type: GraphQLString },
             },
             async resolve(parent, args) {
-                async function addTeamToDB() {
-                    try {
-                        await client.connect();
-                        const database = await client.db('cricket_team');
-                        const collection = await database.collection('teams');
-                        const result = await collection.insertOne({ name: args.name, playerslist: [] });
-                        return result;
-                    }
-                    catch (error) {
-                        console.log(error);
-                    }
-                    finally {
-                        await client.close();
-                    }
+                try{
+                    let data = await repository.addTeam(args.name);
+                    return ({ _id: data.insertedId, name: args.name, playerslist: [] });
                 }
-                let data = await addTeamToDB().catch(console.dir);
-                return ({ _id: data.insertedId,name:args.name,playerslist:[] })
+                catch(err){
+                    return(err);
+                }
             }
         },
         addPlayer: {
             type: idType,
             args: {
-                team_id: { type: GraphQLString}, 
+                team_id: { type: GraphQLString },
                 name: { type: GraphQLString },
                 about: { type: GraphQLString }
             },
             async resolve(parent, args) {
-                async function addPlayerToDB() {
-                    try {
-                        await client.connect();
-                        const database = await client.db('cricket_team');
-                        const collection = await database.collection('players');
-                        const result = await collection.insertOne({ name: args.name, about: args.about });
-                        let id = result.insertedId;
-
-                        const collection1 = await database.collection('teams');
-                        const result1 = await collection1.updateMany({ _id: ObjectId(args.team_id) }, { $push: { playerslist: { _id: id, name: args.name } } })
-                        // result=await collection.find({_id:ObjectId('61deb22b98e8939c0e19c9ab')}).toArray();
-                        return id;
-                    }
-                    catch (error) {
-                        console.log(error);
-                    }
-                    finally {
-                        await client.close();
-                    }
-                }
-                let data = await addPlayerToDB().catch(console.dir);
-                return ({ _id: data , name:'' })
+              try{
+                let data = await repository.addPlayer(args);
+                return ({ _id: data, name: '' });
+              }
+              catch(err){
+                  return (err);
+              }
             }
         },
         deleteTeam: {
@@ -178,73 +219,41 @@ const Mutation = new GraphQLObjectType({
                 teamId: { type: GraphQLString }
             },
             async resolve(parent, args) {
-                async function deleteTeam(){
-                try {
-                    await client.connect();
-                    const database = await client.db('cricket_team')
-                    let collection = await database.collection('teams');
-                    const result = await collection.findOne({ _id: ObjectId(args.teamId) });
-                    const colletion1 = await database.collection('players');
-                    const id=result._id;
-                   result.playerslist.map(async (player) =>  {
-                        const result1 = await colletion1.deleteOne({ _id: player._id });
-                    })
-                    collection = await database.collection('teams');
-                    const result2 = await collection.deleteOne({ _id: ObjectId(args.teamId) })
-                    return id;
+                try{
+                     await repository.deleteTeam(args);
+                    return ({ _id: args.teamId, name: '' });
                 }
-                catch (error) {
-                    console.error(error);
+                catch(err){
+                    return (err);
                 }
-                finally{
-                    client.close();
-                }
-            }
-            let data=await deleteTeam().catch(console.dir)
-            return ({_id:args.teamId,name:''});
             }
         },
-        deletePlayer:{
-            type:idType,
-            args:{
-                teamId:{type:GraphQLString},
-                playerId:{type:GraphQLString},
+        deletePlayer: {
+            type: idType,
+            args: {
+                teamId: { type: GraphQLString },
+                playerId: { type: GraphQLString },
             },
-            async resolve(parent,args){
-                async function deletePlayer(){
-                    try{
-                        await client.connect();
-                        const database=await client.db('cricket_team');
-                        const collection=await database.collection('teams');
-                        const result=await collection.updateOne({_id:ObjectId(args.teamId)},{$pull:{playerslist:{_id:ObjectId(args.playerId)}}});
-                        
-                        const colletion1=await database.collection('players');
-                        const result1=await colletion1.deleteOne({_id:ObjectId(args.playerId)});
-                        console.log(result1);
-                        return {_id:args.teamId}
-                    }
-                    catch(error){
-                        console.error(error)
-                    }
-                    finally{
-                        client.close();
-                    }
+            async resolve(parent, args) {
+                try{
+                    return await repository.deletePlayer(args);
                 }
-                let data=await deletePlayer().catch(console.dir)
-                return data;
+                catch(err){
+                    return (err)
+                }
             }
         }
     }
 })
 
-const schema = new    GraphQLSchema({ query: RootQuery, mutation: Mutation });
+const schema = new GraphQLSchema({ query: RootQuery, mutation: Mutation });
 
-server.use('/graphql', graphqlHTTP({
+server.use('/graphql', graphqlHTTP({     // here using graphql as middleware and in 
     schema,
     graphiql: true
-    }))
-    
-    
+}))
+
+
 
 
 
